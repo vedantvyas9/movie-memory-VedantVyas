@@ -183,7 +183,6 @@ The "Get new fact" button is rate-limited by the same 30-second client cache —
 
 - **Fact history view** — every generated fact is stored in the `Fact` table but never surfaced in the UI. A simple list of past facts on the dashboard would make that data useful.
 - **Streaming OpenAI responses** — using `ReadableStream` to stream the fact token-by-token would make the UI feel faster without changing the architecture significantly.
-- **E2E test for the auth + onboarding flow** — the unit tests cover the API client and the movie edit component, but there are no tests for the full sign-in → onboard → dashboard path. A Playwright test with a mocked OAuth provider would cover this.
 
 ---
 
