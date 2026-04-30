@@ -38,18 +38,19 @@ datasource db {
 // are added automatically — see @auth/prisma-adapter docs.
 
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  name          String?
-  image         String?
-  googleId      String?   @unique  // populated by NextAuth adapter
-  favoriteMovie String?             // null = not yet onboarded
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id             String    @id @default(cuid())
+  email          String    @unique
+  emailVerified  DateTime?            // required by @auth/prisma-adapter; set on first sign-in
+  name           String?
+  image          String?
+  googleId       String?   @unique   // populated by NextAuth adapter
+  favoriteMovie  String?              // null = not yet onboarded
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  facts         Fact[]
-  accounts      Account[]
-  sessions      Session[]
+  facts          Fact[]
+  accounts       Account[]
+  sessions       Session[]
 }
 
 model Fact {
@@ -120,6 +121,9 @@ User can later change their favorite movie. Historical facts remain attributable
 
 ### `@@index([userId, createdAt])`
 `GET /api/fact` runs `findFirst({ where: { userId }, orderBy: { createdAt: 'desc' } })` to retrieve the most recent fact. Without this index that's a full table scan on `Fact`.
+
+### `User.emailVerified` is nullable
+Required by `@auth/prisma-adapter` — the adapter passes this field when creating a user row on first sign-in. Google OAuth does not perform email verification in the same way as magic-link flows, so this field is always `null` in practice but must exist in the schema or Prisma rejects the `createUser` call with a validation error.
 
 ### NextAuth adapter models
 `@auth/prisma-adapter` requires `Account`, `Session`, and `VerificationToken` models. They're included in schema explicitly (rather than relying on the adapter to auto-create them) so migrations are fully version-controlled.
