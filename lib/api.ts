@@ -69,7 +69,8 @@ export async function updateMovie(movie: string): Promise<UpdateMovieResponse> {
 }
 
 // Generate and return a fun fact about the current user's favorite movie.
+// Pass force=true to bypass the DB cache and always call OpenAI (used by "Get new fact").
 // Throws ApiError(400) if no favorite movie is set, ApiError(500) on OpenAI failure.
-export async function getFact(): Promise<FactResponse> {
-  return request<FactResponse>('/api/fact')
+export async function getFact(force = false): Promise<FactResponse> {
+  return request<FactResponse>(force ? '/api/fact?force=true' : '/api/fact')
 }

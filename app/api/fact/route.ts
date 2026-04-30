@@ -5,7 +5,7 @@ import { openai } from "@/lib/openai"
 
 // GET /api/fact — generate a fun fact about the user's favorite movie via
 // OpenAI and persist the result to the Fact table for history.
-export async function GET() {
+export async function GET(request: Request) {
   // Retrieve the session from the request cookie via NextAuth.
   const session = await auth()
 
@@ -32,7 +32,25 @@ export async function GET() {
 
   const movie = user.favoriteMovie
 
-  // Call the OpenAI Chat Completions API to generate a single fun fact.
+  // ?force=true is sent by "Get new fact" to bypass the DB cache and always
+  // generate a fresh fact via OpenAI. All other callers (page load, back navigation)
+  // omit the param and get the stored fact back without an OpenAI call.
+  const force = new URL(request.url).searchParams.get("force") === "true"
+
+  if (!force) {
+    const existing = await db.fact.findFirst({
+      where: { userId: session.user.id, movie },
+      orderBy: { createdAt: "desc" },
+    })
+    if (existing) {
+      return NextResponse.json(
+        { content: existing.content, movie: existing.movie, generatedAt: existing.createdAt.toISOString() },
+        { status: 200 }
+      )
+    }
+  }
+
+  // No stored fact, or caller forced a fresh generation — call OpenAI.
   // If the call fails for any reason (network error, quota exceeded, etc.),
   // catch and return a user-friendly 500 rather than leaking stack traces.
   let content: string
@@ -50,7 +68,8 @@ export async function GET() {
 
     // Extract the text from the first (and only) completion choice.
     // The non-null assertion is safe: the API always returns at least one choice.
-    content = completion.choices[0].message.content!
+    content = completion.choices[0]?.message.content ?? ""
+    if (!content) throw new Error("Empty response from OpenAI")
   } catch {
     return NextResponse.json(
       { error: "Failed to generate a fact. Please try again." },
