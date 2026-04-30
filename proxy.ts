@@ -1,20 +1,25 @@
-import { auth } from "@/lib/auth"
 import { NextResponse } from "next/server"
+import type { NextRequest } from "next/server"
 
-// auth() from NextAuth v5 wraps our handler and populates req.auth with the
-// current session (read from the database via PrismaAdapter). If there is no
-// valid session, redirect the user to the landing page so they can sign in.
-// This proxy only checks authentication — favoriteMovie checks are done inside
-// the page components themselves to avoid a DB call on every matched request.
-export const proxy = auth((req) => {
-  if (!req.auth) {
-    // Unauthenticated — send back to the landing page where "Sign in with Google" lives.
-    return NextResponse.redirect(new URL("/", req.url))
+// Proxy runs on the edge runtime — Prisma (which requires Node.js) cannot be
+// used here. Instead we check for the NextAuth session cookie directly.
+// The real session validation still happens in every API route via auth(), so
+// this check is purely for redirecting the browser to the login page early.
+// NextAuth sets the cookie name based on the environment:
+//   development  → authjs.session-token
+//   production   → __Secure-authjs.session-token (requires HTTPS)
+export function proxy(request: NextRequest) {
+  const hasSession =
+    request.cookies.has("authjs.session-token") ||
+    request.cookies.has("__Secure-authjs.session-token")
+
+  if (!hasSession) {
+    return NextResponse.redirect(new URL("/", request.url))
   }
-})
+}
 
 export const config = {
-  // Only run on these two routes. The landing page (/) is intentionally excluded
-  // because it handles its own auth/redirect logic based on favoriteMovie presence.
+  // Only protect these two routes. The landing page (/) handles its own
+  // auth/redirect logic to avoid a DB call on every unauthenticated visit.
   matcher: ["/dashboard", "/onboarding"],
 }

@@ -14,10 +14,19 @@ import {
   type FactResponse,
 } from "@/lib/api"
 
+// Module-level cache — lives outside the component so it survives back/forward
+// navigation within the same browser tab. Without this, every navigation remounts
+// the component and re-fetches from scratch, causing a loading flash and an
+// unnecessary OpenAI call on every page visit.
+// Cleared implicitly when the user signs out (signOut triggers a full page reload).
+let _userCache: MeResponse | null = null
+let _factCache: { data: FactResponse; at: number } | null = null
+
 export default function DashboardPage() {
   // ── User profile ─────────────────────────────────────────────────────────────
-  const [user, setUser] = useState<MeResponse | null>(null)
-  const [userLoading, setUserLoading] = useState(true)
+  // Initialise from module cache so returning to this page skips the loading state.
+  const [user, setUser] = useState<MeResponse | null>(_userCache)
+  const [userLoading, setUserLoading] = useState(_userCache === null)
   const [userError, setUserError] = useState<string | null>(null)
 
   // ── Inline movie edit ─────────────────────────────────────────────────────────
@@ -27,11 +36,14 @@ export default function DashboardPage() {
   const [movieError, setMovieError] = useState<string | null>(null)
 
   // ── Fact cache ────────────────────────────────────────────────────────────────
-  const [fact, setFact] = useState<FactResponse | null>(null)
+  // Restore fact from module cache if still within the 30-second window.
+  const factFromCache =
+    _factCache && Date.now() - _factCache.at < 30_000 ? _factCache.data : null
+  const [fact, setFact] = useState<FactResponse | null>(factFromCache)
   const [factLoading, setFactLoading] = useState(false)
   const [factError, setFactError] = useState<string | null>(null)
   // Ref keeps the timestamp stable across renders so callbacks never see a stale value.
-  const cachedAtRef = useRef<number | null>(null)
+  const cachedAtRef = useRef<number | null>(factFromCache ? _factCache!.at : null)
 
   // ── Mount: fetch user profile and initial fact in parallel ────────────────────
   useEffect(() => {
@@ -43,7 +55,10 @@ export default function DashboardPage() {
       setUserLoading(true)
       try {
         const me = await getMe()
-        if (!cancelled) setUser(me)
+        if (!cancelled) {
+          _userCache = me  // persist to module cache for next navigation
+          setUser(me)
+        }
       } catch (err) {
         if (!cancelled)
           setUserError(err instanceof ApiError ? err.message : "Failed to load profile.")
@@ -53,12 +68,12 @@ export default function DashboardPage() {
     }
 
     async function fetchFactOnMount() {
-      // Cache is always empty on mount — always fetch.
       setFactLoading(true)
       setFactError(null)
       try {
         const result = await getFact()
         if (!cancelled) {
+          _factCache = { data: result, at: Date.now() }  // persist to module cache
           setFact(result)
           cachedAtRef.current = Date.now()
         }
@@ -70,9 +85,15 @@ export default function DashboardPage() {
       }
     }
 
-    // Fire both requests concurrently — user profile and fact are independent.
-    fetchUser()
-    fetchFactOnMount()
+    // Skip fetches when module cache already has fresh data — prevents redundant
+    // network calls and loading states on back/forward navigation.
+    if (!_userCache) {
+      fetchUser()
+    }
+
+    if (!_factCache || Date.now() - _factCache.at >= 30_000) {
+      fetchFactOnMount()
+    }
 
     return () => {
       cancelled = true
@@ -80,7 +101,7 @@ export default function DashboardPage() {
   }, [])
 
   // ── Fetch fact on demand (cache-aware) ────────────────────────────────────────
-  // force=true: always fetch (button click). force=false: skip if cache is warm.
+  // force=false: respect the 30-second window. force=true: always go to server.
   async function handleGetFact(force: boolean) {
     if (
       !force &&
@@ -92,7 +113,9 @@ export default function DashboardPage() {
     setFactLoading(true)
     setFactError(null)
     try {
-      const result = await getFact()
+      // force=true bypasses the server-side DB cache so a new OpenAI fact is generated.
+      const result = await getFact(true)
+      _factCache = { data: result, at: Date.now() }  // update module cache
       setFact(result)
       cachedAtRef.current = Date.now()
     } catch (err) {
@@ -128,13 +151,21 @@ export default function DashboardPage() {
 
     try {
       const result = await updateMovie(trimmed)
-      // Server confirmed — lock in the canonical value and exit edit mode.
-      setUser((prev) => (prev ? { ...prev, favoriteMovie: result.favoriteMovie } : prev))
+      // Server confirmed — lock in the canonical value and update module cache.
+      setUser((prev) => {
+        const updated = prev ? { ...prev, favoriteMovie: result.favoriteMovie } : prev
+        if (updated) _userCache = updated
+        return updated
+      })
       setEditMode(false)
-      // Movie changed — bust the fact cache and immediately fetch a new fact.
-      setFact(null)
-      cachedAtRef.current = null
-      await handleGetFact(false)
+      // Only bust the fact cache when the movie actually changed; if the user
+      // saved the same title, the existing fact is still accurate.
+      if (result.favoriteMovie !== previous) {
+        _factCache = null  // invalidate module cache so next navigation re-fetches
+        setFact(null)
+        cachedAtRef.current = null
+        await handleGetFact(false)
+      }
     } catch (err) {
       // Revert to the previous movie name, keep edit mode open, show the error.
       setUser((prev) => (prev ? { ...prev, favoriteMovie: previous } : prev))
@@ -291,9 +322,9 @@ export default function DashboardPage() {
             </p>
           )}
 
-          {/* "Get new fact" always bypasses the 30-second cache (force=true) */}
+          {/* Respects the 30-second cache — goes to server only when the window has expired */}
           <button
-            onClick={() => handleGetFact(true)}
+            onClick={() => handleGetFact(false)}
             disabled={factLoading}
             className="text-sm font-semibold text-gray-900 underline underline-offset-4 hover:text-gray-600 disabled:opacity-50"
           >

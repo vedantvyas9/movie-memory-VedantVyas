@@ -13,11 +13,12 @@ datasource db {
 // Represents a signed-in user. Created automatically by NextAuth when someone
 // first signs in with Google.
 model User {
-  id            String    @id @default(cuid()) // primary key, auto-generated unique ID
-  email         String    @unique              // Google account email, must be unique
-  name          String?                        // display name from Google (optional)
-  image         String?                        // avatar URL from Google (optional)
-  googleId      String?   @unique             // Google's own user ID, stored for reference
+  id             String    @id @default(cuid()) // primary key, auto-generated unique ID
+  email          String    @unique              // Google account email, must be unique
+  emailVerified  DateTime?                      // required by @auth/prisma-adapter; set by NextAuth on first sign-in
+  name           String?                        // display name from Google (optional)
+  image          String?                        // avatar URL from Google (optional)
+  googleId       String?   @unique             // Google's own user ID, stored for reference
   favoriteMovie String?                        // null means the user hasn't completed onboarding yet
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt           // automatically updated on every write
